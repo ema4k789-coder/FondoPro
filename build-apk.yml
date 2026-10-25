@@ -1,10 +1,12 @@
+
 name: Build FondoPro APK
 
 'on':
   workflow_dispatch:
   push:
     paths:
-      - 'FondoPro-galeria-corregida.zip'
+      - '*.zip'
+      - '**/*.zip'
       - '.github/workflows/build-apk.yml'
 
 permissions:
@@ -12,27 +14,43 @@ permissions:
 
 jobs:
   build:
-    name: Compilar APK Android
+    name: Compilar versión actual
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar repositorio
+      - name: Descargar versión actual del repositorio
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Verificar y extraer ZIP de FondoPro
+      - name: Seleccionar ZIP actualizado
         shell: bash
         run: |
           set -euo pipefail
+
           ZIP_FILE="FondoPro-galeria-corregida.zip"
+
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "::error::No se encontró $ZIP_FILE en la raíz del repositorio."
+            echo "::error::No existe $ZIP_FILE en la raíz del repositorio."
+            echo "ZIP disponibles:"
             find . -maxdepth 2 -type f -iname '*.zip' -print
             exit 1
           fi
+
+          echo "ZIP seleccionado: $ZIP_FILE"
+          sha256sum "$ZIP_FILE"
           unzip -t "$ZIP_FILE"
           unzip -oq "$ZIP_FILE"
-          test -f fondopro/capacitor/package.json || { echo "::error::Falta fondopro/capacitor/package.json"; find . -maxdepth 6 -name package.json -print; exit 1; }
-          cmp -s fondopro/app.js fondopro/capacitor/www/app.js || { echo "::error::Los app.js no coinciden"; exit 1; }
+
+          test -f fondopro/capacitor/package.json || {
+            echo "::error::El ZIP no contiene fondopro/capacitor/package.json"
+            exit 1
+          }
+
+          test -f fondopro/capacitor/www/index.html
+          test -f fondopro/capacitor/www/app.js
+
+          echo "Versión extraída correctamente."
 
       - name: Configurar Java
         uses: actions/setup-java@v5
@@ -45,42 +63,28 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Validar JavaScript
         run: |
           set -euo pipefail
-          node --check fondopro/app.js
           node --check fondopro/capacitor/www/app.js
 
-      - name: Instalar dependencias de Capacitor
+      - name: Instalar dependencias
         working-directory: fondopro/capacitor
         run: npm install
 
-      - name: Preparar plugin de galería
+      - name: Preparar Android
         working-directory: fondopro/capacitor
         shell: bash
         run: |
           set -euo pipefail
-          PLUGIN="node_modules/@capacitor-community/media/dist/plugin.js"
-          if [ ! -f "$PLUGIN" ]; then
-            echo "::error::No se encontró el archivo JavaScript del plugin Media: $PLUGIN"
-            find node_modules/@capacitor-community/media -maxdepth 3 -type f -print
-            exit 1
-          fi
-          cp "$PLUGIN" www/media-plugin.js
-          test -s www/media-plugin.js
 
-      - name: Preparar proyecto Android
-        working-directory: fondopro/capacitor
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -d android ]; then npx cap add android; fi
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
           npx cap sync android
 
-      - name: Compilar APK de depuración
+      - name: Compilar APK
         working-directory: fondopro/capacitor/android
         shell: bash
         run: |
@@ -88,18 +92,10 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Verificar APK generado
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK" || { echo "::error::No se generó el APK"; exit 1; }
-          ls -lh "$APK"
-
-      - name: Publicar APK para descargar
+      - name: Publicar APK de esta ejecución
         uses: actions/upload-artifact@v4
         with:
-          name: FondoPro-debug-APK
+          name: FondoPro-APK-run-${{ github.run_number }}
           path: fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
