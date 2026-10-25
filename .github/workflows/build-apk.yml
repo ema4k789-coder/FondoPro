@@ -2,17 +2,18 @@
 name: Build FondoPro APK
 
 'on':
+  workflow_dispatch:
   push:
     paths:
-      - "*.zip"
-      - ".github/workflows/build-apk.yml"
-  workflow_dispatch:
+      - 'FondoPro-editor-integral-corregido.zip'
+      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Compilar APK Android
     runs-on: ubuntu-latest
 
     steps:
@@ -23,52 +24,102 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: '21'
+          cache: gradle
 
-      - name: Configurar Node
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: fondopro/capacitor/package-lock.json
 
-      - name: Extraer FondoPro
+      - name: Verificar y extraer ZIP de FondoPro
         shell: bash
         run: |
-          set -e
-          ZIP_FILE="FondoPro-mejoras-completas.zip"
+          set -euo pipefail
+
+          ZIP_FILE="FondoPro-editor-integral-corregido.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "No se encontro el ZIP requerido"
+            echo "::error::No se encontró $ZIP_FILE en la raíz del repositorio."
+            echo "Archivos ZIP encontrados:"
+            find . -maxdepth 2 -type f -iname '*.zip' -print
             exit 1
           fi
 
+          echo "Verificando integridad del ZIP..."
+          unzip -t "$ZIP_FILE"
+
+          echo "Extrayendo proyecto..."
           unzip -oq "$ZIP_FILE"
 
           if [ ! -f "fondopro/capacitor/package.json" ]; then
-            echo "No se encontro package.json"
-            find . -maxdepth 5 -name package.json
+            echo "::error::No se encontró fondopro/capacitor/package.json."
+            echo "Estructura extraída:"
+            find . -maxdepth 5 -name package.json -print
             exit 1
           fi
 
-      - name: Instalar dependencias
-        working-directory: fondopro/capacitor
-        run: |
-          npm install
+          if [ ! -f "fondopro/app.js" ] || [ ! -f "fondopro/capacitor/www/app.js" ]; then
+            echo "::error::Falta app.js en la carpeta web o en Capacitor."
+            exit 1
+          fi
 
-      - name: Preparar Android
-        working-directory: fondopro/capacitor
+          if ! cmp -s "fondopro/app.js" "fondopro/capacitor/www/app.js"; then
+            echo "::error::Los archivos app.js de la raíz y de Capacitor no coinciden."
+            exit 1
+          fi
+
+          echo "ZIP y archivos principales verificados."
+
+      - name: Validar JavaScript
+        shell: bash
         run: |
+          set -euo pipefail
+          node --check fondopro/app.js
+          node --check fondopro/capacitor/www/app.js
+
+      - name: Instalar dependencias de Capacitor
+        working-directory: fondopro/capacitor
+        run: npm install
+
+      - name: Preparar proyecto Android
+        working-directory: fondopro/capacitor
+        shell: bash
+        run: |
+          set -euo pipefail
+
           if [ ! -d android ]; then
             npx cap add android
           fi
+
           npx cap sync android
 
-      - name: Compilar APK
+      - name: Compilar APK de prueba
         working-directory: fondopro/capacitor/android
+        shell: bash
         run: |
+          set -euo pipefail
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Guardar APK
+      - name: Verificar APK generado
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -s "$APK" ]; then
+            echo "::error::No se generó el APK esperado."
+            exit 1
+          fi
+
+          ls -lh "$APK"
+          echo "APK generado correctamente."
+
+      - name: Publicar APK para descargar
         uses: actions/upload-artifact@v4
         with:
           name: FondoPro-debug-APK
