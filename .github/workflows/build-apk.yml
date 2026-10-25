@@ -20,20 +20,6 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: gradle
-
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: fondopro/capacitor/package-lock.json
-
       - name: Verificar y extraer ZIP de FondoPro
         shell: bash
         run: |
@@ -43,7 +29,6 @@ jobs:
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "::error::No se encontró $ZIP_FILE en la raíz del repositorio."
-            echo "Archivos ZIP encontrados:"
             find . -maxdepth 2 -type f -iname '*.zip' -print
             exit 1
           fi
@@ -56,22 +41,32 @@ jobs:
 
           if [ ! -f "fondopro/capacitor/package.json" ]; then
             echo "::error::No se encontró fondopro/capacitor/package.json."
-            echo "Estructura extraída:"
-            find . -maxdepth 5 -name package.json -print
+            find . -maxdepth 6 -name package.json -print
             exit 1
           fi
 
           if [ ! -f "fondopro/app.js" ] || [ ! -f "fondopro/capacitor/www/app.js" ]; then
-            echo "::error::Falta app.js en la carpeta web o en Capacitor."
+            echo "::error::Falta app.js en una de las carpetas."
             exit 1
           fi
 
           if ! cmp -s "fondopro/app.js" "fondopro/capacitor/www/app.js"; then
-            echo "::error::Los archivos app.js de la raíz y de Capacitor no coinciden."
+            echo "::error::Los archivos app.js no coinciden."
             exit 1
           fi
 
-          echo "ZIP y archivos principales verificados."
+          echo "Proyecto extraído y archivos verificados."
+
+      - name: Configurar Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Validar JavaScript
         shell: bash
@@ -96,12 +91,30 @@ jobs:
 
           npx cap sync android
 
-      - name: Compilar APK de prueba
+      - name: Verificar archivos de Gradle
         working-directory: fondopro/capacitor/android
         shell: bash
         run: |
           set -euo pipefail
+
+          if [ ! -f gradlew ]; then
+            echo "::error::No se encontró gradlew."
+            exit 1
+          fi
+
+          if [ ! -f gradle/wrapper/gradle-wrapper.properties ]; then
+            echo "::error::Falta gradle/wrapper/gradle-wrapper.properties."
+            exit 1
+          fi
+
           chmod +x gradlew
+          echo "Archivos de Gradle encontrados."
+
+      - name: Compilar APK de depuración
+        working-directory: fondopro/capacitor/android
+        shell: bash
+        run: |
+          set -euo pipefail
           ./gradlew assembleDebug
 
       - name: Verificar APK generado
