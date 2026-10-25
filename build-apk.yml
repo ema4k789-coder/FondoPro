@@ -1,0 +1,105 @@
+name: Build FondoPro APK
+
+'on':
+  workflow_dispatch:
+  push:
+    paths:
+      - 'FondoPro-galeria-corregida.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar APK Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Verificar y extraer ZIP de FondoPro
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE="FondoPro-galeria-corregida.zip"
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "::error::No se encontró $ZIP_FILE en la raíz del repositorio."
+            find . -maxdepth 2 -type f -iname '*.zip' -print
+            exit 1
+          fi
+          unzip -t "$ZIP_FILE"
+          unzip -oq "$ZIP_FILE"
+          test -f fondopro/capacitor/package.json || { echo "::error::Falta fondopro/capacitor/package.json"; find . -maxdepth 6 -name package.json -print; exit 1; }
+          cmp -s fondopro/app.js fondopro/capacitor/www/app.js || { echo "::error::Los app.js no coinciden"; exit 1; }
+
+      - name: Configurar Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Validar JavaScript
+        run: |
+          set -euo pipefail
+          node --check fondopro/app.js
+          node --check fondopro/capacitor/www/app.js
+
+      - name: Instalar dependencias de Capacitor
+        working-directory: fondopro/capacitor
+        run: npm install
+
+      - name: Preparar plugin de galería
+        working-directory: fondopro/capacitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLUGIN="node_modules/@capacitor-community/media/dist/plugin.js"
+          if [ ! -f "$PLUGIN" ]; then
+            echo "::error::No se encontró el archivo JavaScript del plugin Media: $PLUGIN"
+            find node_modules/@capacitor-community/media -maxdepth 3 -type f -print
+            exit 1
+          fi
+          cp "$PLUGIN" www/media-plugin.js
+          test -s www/media-plugin.js
+
+      - name: Preparar proyecto Android
+        working-directory: fondopro/capacitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+
+      - name: Compilar APK de depuración
+        working-directory: fondopro/capacitor/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Verificar APK generado
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK" || { echo "::error::No se generó el APK"; exit 1; }
+          ls -lh "$APK"
+
+      - name: Publicar APK para descargar
+        uses: actions/upload-artifact@v4
+        with:
+          name: FondoPro-debug-APK
+          path: fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
