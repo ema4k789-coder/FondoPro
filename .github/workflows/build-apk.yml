@@ -1,73 +1,91 @@
-
 name: Build FondoPro APK
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+push:
+paths:
+- '**.zip'
+- '.github/workflows/build-apk.yml'
+workflow_dispatch:
 
 permissions:
-  contents: read
+contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
+steps:
+  - name: Descargar repositorio
+    uses: actions/checkout@v4
 
-      - name: Configurar Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
+  - name: Configurar Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
 
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+  - name: Configurar Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '20'
 
-      - name: Preparar Android SDK
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1)"
-          fi
-          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
-            echo "No se encontró sdkmanager en el Android SDK preinstalado."
-            exit 1
-          fi
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+  - name: Preparar Android SDK
+    uses: android-actions/setup-android@v3
 
-      - name: Extraer proyecto
-        run: |
-          test -f FondoPro-Desde-Cero.zip
-          unzip -o FondoPro-Desde-Cero.zip
-          test -f FondoPro/capacitor/package.json
+  - name: Extraer proyecto
+    shell: bash
+    run: |
+      set -e
+      ZIP_FILE="$(find . -maxdepth 1 -type f -iname 'FondoPro*.zip' | head -n 1)"
+      if [ -z "$ZIP_FILE" ]; then
+        echo "ERROR: No se encontró un ZIP FondoPro en la raíz del repositorio."
+        ls -la
+        exit 1
+      fi
+      echo "Archivo encontrado: $ZIP_FILE"
+      mkdir -p proyecto_extraido
+      unzip -oq "$ZIP_FILE" -d proyecto_extraido
+      find proyecto_extraido -maxdepth 3 -type f | head -80
 
-      - name: Preparar proyecto Android
-        working-directory: FondoPro/capacitor
-        run: |
-          npm install
-          npx cap add android
-          npx cap sync android
+  - name: Localizar proyecto Android
+    shell: bash
+    run: |
+      set -e
+      if [ -f proyecto_extraido/FondoPro/capacitor/package.json ]; then
+        echo "PROJECT_DIR=proyecto_extraido/FondoPro/capacitor" >> "$GITHUB_ENV"
+      elif [ -f proyecto_extraido/capacitor/package.json ]; then
+        echo "PROJECT_DIR=proyecto_extraido/capacitor" >> "$GITHUB_ENV"
+      elif [ -f proyecto_extraido/package.json ]; then
+        echo "PROJECT_DIR=proyecto_extraido" >> "$GITHUB_ENV"
+      else
+        echo "ERROR: No se encontró package.json en las ubicaciones esperadas."
+        find proyecto_extraido -name package.json -o -name capacitor.config.json
+        exit 1
+      fi
 
-      - name: Compilar APK
-        working-directory: FondoPro/capacitor/android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  - name: Instalar dependencias
+    run: |
+      cd "$PROJECT_DIR"
+      npm install
 
-      - name: Guardar APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: FondoPro-debug-APK
-          path: FondoPro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+  - name: Preparar proyecto Android
+    run: |
+      cd "$PROJECT_DIR"
+      npx cap sync android
+      if [ ! -d android ]; then
+        echo "ERROR: Capacitor no generó la carpeta android."
+        exit 1
+      fi
+
+  - name: Compilar APK
+    run: |
+      cd "$PROJECT_DIR/android"
+      chmod +x gradlew
+      ./gradlew assembleDebug
+
+  - name: Guardar APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: FondoPro-APK
+      path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/*.apk
+      if-no-files-found: error
