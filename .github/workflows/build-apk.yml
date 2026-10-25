@@ -1,3 +1,4 @@
+```yaml
 name: Build FondoPro APK
 
 'on':
@@ -13,79 +14,65 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
+      # 1. Descargar el repositorio
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
+      # 2. Configurar Java
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
+      # 3. Configurar Node.js
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: fondopro/capacitor/package-lock.json
 
+      # 4. Preparar Android SDK
       - name: Preparar Android SDK
         shell: bash
         run: |
           set -euo pipefail
+
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
           if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1 || true)"
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+              -type f -name sdkmanager 2>/dev/null | head -n 1 || true)"
           fi
+
           if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
             echo "ERROR: No se encontró sdkmanager."
             exit 1
           fi
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # 5. Localizar y extraer el ZIP
       - name: Extraer proyecto
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname 'FondoPro*.zip' -print -quit)"
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No se encontró un ZIP FondoPro en la raíz."
-            ls -la
-            exit 1
-          fi
-          echo "ZIP encontrado: $ZIP_FILE"
-          unzip -oq "$ZIP_FILE"
-          if [ ! -f FondoPro/capacitor/package.json ]; then
-            echo "ERROR: Falta FondoPro/capacitor/package.json."
-            find . -maxdepth 4 -name package.json -print
-            exit 1
-          fi
 
-      - name: Preparar proyecto Android
-        working-directory: FondoPro/capacitor
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install
-          npx cap add android
-          npx cap sync android
+          ZIP_FILE="FondoPro-mejoras-completas.zip"
 
-      - name: Compilar APK
-        working-directory: FondoPro/capacitor/android
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          if [ ! -f "$ZIP_FILE" ]; then
+            ZIP_FILE="$(find . -maxdepth 1 -type f \
+              -iname 'FondoPro*.zip' -print -quit)"
 
-      - name: Guardar APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: FondoPro-debug-APK
-          path: FondoPro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
