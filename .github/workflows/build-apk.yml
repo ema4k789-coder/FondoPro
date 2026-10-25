@@ -1,0 +1,80 @@
+
+name: Build FondoPro APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'FondoPro-galeria-corregida.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Extraer ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="FondoPro-galeria-corregida.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "::error::No se encuentra $ZIP en la raíz del repositorio."
+            find . -maxdepth 2 -type f -iname '*.zip' -print
+            exit 1
+          fi
+
+          unzip -t "$ZIP"
+          unzip -oq "$ZIP"
+
+          test -f fondopro/capacitor/package.json
+          test -f fondopro/capacitor/www/index.html
+          test -f fondopro/capacitor/www/app.js
+
+      - name: Configurar Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validar JavaScript
+        run: node --check fondopro/capacitor/www/app.js
+
+      - name: Instalar dependencias
+        working-directory: fondopro/capacitor
+        run: npm install
+
+      - name: Preparar Android
+        working-directory: fondopro/capacitor
+        run: |
+          set -euo pipefail
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Compilar APK
+        working-directory: fondopro/capacitor/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FondoPro-APK-nuevo
+          path: fondopro/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
