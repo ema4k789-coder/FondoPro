@@ -4,7 +4,8 @@ name: Build FondoPro APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -14,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar proyecto
+      - name: Descargar repositorio
         uses: actions/checkout@v4
 
       - name: Configurar Java
@@ -28,14 +29,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Extraer proyecto
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Comprobar y extraer proyecto
         run: |
+          test -f FondoPro-Desde-Cero.zip
           unzip -o FondoPro-Desde-Cero.zip
 
-      - name: Instalar Android SDK
+      - name: Instalar componentes Android
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Preparar proyecto Android
         working-directory: FondoPro/capacitor
@@ -50,7 +54,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Descargar APK
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: FondoPro-debug-APK
